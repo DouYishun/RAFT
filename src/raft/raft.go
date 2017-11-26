@@ -411,7 +411,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 }
 
 
-/*-----------others-----------*/
+/*-----------other func-----------*/
 func (rf *Raft) getRandElectionTimeOut() time.Duration {
 	rand.Seed(int64(rf.me + time.Now().Nanosecond()))  // (rf.me + now.nanosecond) as seed
 	return time.Duration(rf.electionTimeOut + int64(rand.Intn(300))) * time.Millisecond
