@@ -152,16 +152,18 @@ type AppendEntriesReply struct {
 	Success bool // true if follower contained entry matching prevLogIndex and prevLogTerm
 }
 
-// AppendEntries RPC handler.
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
+	/*
+	AppendEntries RPC handler.
+	*/
+	reply.Success = true
 	if rf.currentTerm < args.Term {
 		rf.currentTerm = args.Term
-		rf.updateState(FOLLOWER)
-		reply.Success = true
+		rf.updateState(FOLLOWER)  // for candidate: discover new term
 	} else if rf.currentTerm > args.Term {
 		reply.Term = rf.currentTerm
 		reply.Success = false
-	} else { reply.Success = true }
+	}
 	//log.Printf("Term [%d]: server [%d] receive append entries from [%d].\n", rf.currentTerm, rf.me, args.LeaderId)
 	rf.appendCh <- true
 }
@@ -245,7 +247,7 @@ func (rf *Raft) startElection() {
 					}
 				}
 			} else {
-				//log.Printf("Server [%d] send vote request to [%d] failed.\n", rf.me, i)
+				//log.Printf("Term [%d]: server [%d] send vote request to [%d] failed.\n", rf.currentTerm, rf.me, i)
 			}
 		}(serverId)
 	}
@@ -293,18 +295,25 @@ func (rf *Raft) run() {
 func (rf *Raft) runAsLeader() {
 	if rf.state != LEADER { return }
 
+	heartbeatTimeout := time.After(rf.getHeartbeatTimeOut())
+
 	rf.logReplication()
-	time.Sleep(rf.getHeartbeatTimeOut())
+
+	select {
+	case <- heartbeatTimeout:
+		return
+	//something else
+	}
 }
 
 func (rf *Raft) runAsCandidate() {
 	if rf.state != CANDIDATE { return }
 
 	select {
-	case <- rf.appendCh:  // receive from new leader
+	case <- rf.appendCh:  // discovers current leader
+		rf.electionTimer.Reset(rf.getRandElectionTimeOut())
 		rf.updateState(FOLLOWER)
 	case <- rf.electionTimer.C:  // election timeout
-		rf.electionTimer.Reset(rf.getRandElectionTimeOut())
 		rf.startElection()
 	default:
 		if rf.voteNum > len(rf.peers) / 2 { rf.updateState(LEADER) }  // receive majority vote
