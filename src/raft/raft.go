@@ -22,10 +22,14 @@ const (
 	FOLLOWER = "follower"
 	CANDIDATE = "candidate"
 	LEADER = "leader"
+
+	ELECTIONTIMEOUT = 500
+	HEARTBEATTIMEOUT = 100
 )
 
 type LogEntry struct {
 	Term int
+	Index int
 	Command interface{}
 }
 
@@ -56,8 +60,6 @@ type Raft struct {
 
 	electionTimer *time.Timer
 
-	electionTimeOut int64
-	heartbeatTimeOut int64
 }
 
 func (rf *Raft) GetState() (int, bool) {
@@ -399,9 +401,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedCh = make(chan bool, len(rf.peers))
 	rf.appendCh = make(chan bool, len(rf.peers))
 
-	rf.electionTimeOut = 500
-	rf.heartbeatTimeOut = 100
-
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
@@ -414,9 +413,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 /*-----------other func-----------*/
 func (rf *Raft) getRandElectionTimeOut() time.Duration {
 	rand.Seed(int64(rf.me + time.Now().Nanosecond()))  // (rf.me + now.nanosecond) as seed
-	return time.Duration(rf.electionTimeOut + int64(rand.Intn(300))) * time.Millisecond
+	return time.Duration(ELECTIONTIMEOUT + int64(rand.Intn(300))) * time.Millisecond
 }
 
 func (rf *Raft) getHeartbeatTimeOut() time.Duration {
-	return time.Duration(rf.heartbeatTimeOut) * time.Millisecond
+	return time.Duration(HEARTBEATTIMEOUT) * time.Millisecond
 }
