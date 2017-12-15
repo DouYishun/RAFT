@@ -6,6 +6,8 @@ import (
 	"log"
 	"time"
 	"math/rand"
+	"bytes"
+	"encoding/gob"
 )
 
 // import "bytes"
@@ -83,26 +85,26 @@ func (rf *Raft) persist() {
 	where it can later be retrieved after a crash and restart.
 	see paper's Figure 2 for a description of what should be persistent.
 	*/
-	// Your code here.
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := gob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	enc.Encode(rf.currentTerm)
+	enc.Encode(rf.voteFor)
+	enc.Encode(rf.log)
+	data := buf.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 func (rf *Raft) readPersist(data []byte) {
 	/*
 	Restore previously persisted state.
 	*/
-	// Your code here.
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := gob.NewDecoder(r)
-	// d.Decode(&rf.xxx)
-	// d.Decode(&rf.yyy)
+	if data != nil {
+		reader := bytes.NewBuffer(data)
+		dec := gob.NewDecoder(reader)
+		dec.Decode(&rf.currentTerm)
+		dec.Decode(&rf.voteFor)
+		dec.Decode(&rf.log)
+	}
 }
 
 type RequestVoteArgs struct {
@@ -152,6 +154,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 	if reply.VoteGranted {
 		//log.Printf("[%d] success votes for [%d]", rf.me, args.CandidateId)
+		rf.persist()
 		rf.votedCh <- true
 	} else {
 		//log.Printf("[%d] reject votes for [%d], log check [%s]", rf.me, args.CandidateId, logCheckPass)
@@ -213,6 +216,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			rf.appendCh <- true   // fix bugs
 		}
 	}
+	rf.persist()
 	//log.Printf("Term [%d]: server [%d] receive append entries from [%d].\n", rf.currentTerm, rf.me, args.LeaderId)
 }
 
@@ -250,7 +254,7 @@ func (rf *Raft) updateState(state string) {
 	switch state {
 	case LEADER:
 		for i := 0; i < len(rf.peers); i++ {
-			rf.nextIndex[i] = rf.getLastLogIndex() + 1
+			rf.nextIndex[i] = rf.getLastLogIndex() + 1  // init to leader last log index + 1
 			rf.matchIndex[i] = 0
 		}
 		rf.state = LEADER
@@ -321,7 +325,7 @@ func (rf* Raft) logReplication() {
 	mask := make(map[int]bool, len(rf.peers)) // filter servers which match logs fail
 	for i := 0; i < len(rf.peers); i++ {
 		if i == rf.me || mask[i] { continue }
-		rf.nextIndex[i] = min(rf.nextIndex[i], rf.getLastLogIndex() + 1)
+		rf.nextIndex[i] = min(rf.nextIndex[i], rf.getLastLogIndex() + 1)  // for robustness
 		args := AppendEntriesArgs{
 			Term: rf.currentTerm,
 			LeaderId: rf.me,
@@ -477,16 +481,19 @@ func (rf *Raft) runAsFollower() {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	index := -1
 	term := -1
 	isLeader := true
 
 	term, isLeader = rf.GetState()
 	if isLeader {
-		rf.mu.Lock()
 		index = len(rf.log)
+		term = rf.currentTerm
 		rf.log = append(rf.log, LogEntry{Term:term, Index:index, Command:command})
-		rf.mu.Unlock()
+		rf.persist()
 	}
 
 	return index, term, isLeader
@@ -545,6 +552,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	go rf.run()
 
+	rf.persist()
 	return rf
 }
 
