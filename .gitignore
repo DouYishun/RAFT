@@ -1,2 +1,4 @@
 .idea
 test_go.go
+src/raft/while.sh
+src/raft/fuck.sh
