@@ -10,9 +10,6 @@ import (
 	"encoding/gob"
 )
 
-// import "bytes"
-// import "encoding/gob"
-
 type ApplyMsg struct {
 	Index       int
 	Command     interface{}
@@ -145,9 +142,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		reply.Term = rf.currentTerm
 	}
 
+	rf.persist()
 	if reply.VoteGranted {
 		//log.Printf("[%d] success votes for [%d]", rf.me, args.CandidateId)
-		rf.persist()
 		rf.votedCh <- true
 	} else {
 		//log.Printf("[%d] reject votes for [%d], log check [%s]", rf.me, args.CandidateId, logCheckPass)
@@ -416,14 +413,12 @@ func (rf *Raft) runAsLeader() {
 	rf.logReplication()
 	if rf.state != LEADER { return }
 
-	if rf.updateCommitIndex() {
-		rf.commitLog()
-	}
-
 	select {
 	case <- heartbeatTimeout:
-		return
-		//something else
+		if rf.updateCommitIndex() {
+			rf.commitLog()
+		}
+	//something else
 	}
 }
 
