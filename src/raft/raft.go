@@ -24,9 +24,6 @@ const (
 	FOLLOWER = "follower"
 	CANDIDATE = "candidate"
 	LEADER = "leader"
-
-	ELECTIONTIMEOUT = 500
-	HEARTBEATTIMEOUT = 100
 )
 
 type LogEntry struct {
@@ -64,7 +61,6 @@ type Raft struct {
 	applyCh chan ApplyMsg  // signal
 
 	electionTimer *time.Timer
-
 }
 
 func (rf *Raft) GetState() (int, bool) {
@@ -73,7 +69,6 @@ func (rf *Raft) GetState() (int, bool) {
 	*/
 	var term int
 	var isLeader bool
-	// Your code here.
 	term = rf.currentTerm
 	isLeader = rf.state == LEADER
 	return term, isLeader
@@ -143,11 +138,9 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 			rf.voteFor = args.CandidateId
 			reply.VoteGranted = true
 		}
-	} else if rf.currentTerm == args.Term && logCheckPass {
-		if rf.voteFor == -1 {
-			rf.voteFor = args.CandidateId
-			reply.VoteGranted = true
-		}
+	} else if rf.currentTerm == args.Term && logCheckPass && rf.voteFor == -1 {
+		rf.voteFor = args.CandidateId
+		reply.VoteGranted = true
 	} else if rf.currentTerm > args.Term {
 		reply.Term = rf.currentTerm
 	}
@@ -213,7 +206,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			}
 			reply.Success = true
 			reply.ExpectedNextIndex = rf.getLastLogIndex() + 1
-			rf.appendCh <- true   // fix bugs
+			rf.appendCh <- true
 		}
 	}
 	rf.persist()
@@ -250,7 +243,7 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *App
 func (rf *Raft) updateState(state string) {
 	if state == rf.state { return }
 
-	preState := rf.state
+	//preState := rf.state
 	switch state {
 	case LEADER:
 		for i := 0; i < len(rf.peers); i++ {
@@ -267,7 +260,7 @@ func (rf *Raft) updateState(state string) {
 	default:
 		log.Fatalf("In updateState: invalid state %s.", state)
 	}
-	log.Printf("Term [%d]: server [%d] transfer from [%s] to [%s]\n", rf.currentTerm, rf.me, preState, rf.state)
+	//log.Printf("Term [%d]: server [%d] transfer from [%s] to [%s]\n", rf.currentTerm, rf.me, preState, rf.state)
 }
 
 func (rf *Raft) startElection() {
@@ -335,6 +328,7 @@ func (rf* Raft) logReplication() {
 		if rf.getLastLogIndex() >= rf.nextIndex[i] { // last log index > nextIndex: add logs to entry
 			args.Entries = rf.log[rf.nextIndex[i]:]
 		}
+
 		go func(server int, args AppendEntriesArgs) {
 			reply := AppendEntriesReply{}
 			if rf.state == LEADER && rf.sendAppendEntries(server, args, &reply) { // Append entries RPC
@@ -360,7 +354,7 @@ func (rf *Raft) logReplicationHandler(server int, reply AppendEntriesReply, mask
 			rf.currentTerm = reply.Term
 			rf.updateState(FOLLOWER)
 		} else {
-			// log inconsistent (include len(server.log) < preLogIndex)
+			// log inconsistent
 			rf.logReplication()
 		}
 	}
@@ -387,7 +381,7 @@ func (rf *Raft) updateCommitIndex() bool {
 func (rf *Raft) commitLog() {
 	/*
 	1. Apply log[lastApplied:commitIndex] to state machine
-	2. increment lastApplied
+	2. Increment lastApplied
 	*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -412,7 +406,6 @@ func (rf *Raft) run() {
 		default:
 			log.Fatalf("Invalid state %s.", rf.state)
 		}
-		//go rf.commitLog()
 	}
 }
 
@@ -459,7 +452,6 @@ func (rf *Raft) runAsFollower() {
 	select {
 	case <-rf.votedCh:  // success vote for a candidate
 	case <-rf.appendCh:  // receive append entries (log or heartbeat)
-
 	case <-rf.electionTimer.C:  // time out, update to CANDIDATE, start new election
 		rf.mu.Lock()
 		rf.updateState(CANDIDATE)
@@ -566,14 +558,9 @@ func (rf *Raft)getRandElectionTimeOut() time.Duration {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	return time.Millisecond * time.Duration(r.Int63n(100) + 400)
 }
-/*
-func (rf *Raft) getRandElectionTimeOut() time.Duration {
-	rand.Seed(int64(rf.me + time.Now().Nanosecond()))  // (rf.me + now.nanosecond) as seed
-	return time.Duration(ELECTIONTIMEOUT + int64(rand.Intn(300))) * time.Millisecond
-}*/
 
 func (rf *Raft) getHeartbeatTimeOut() time.Duration {
-	return time.Duration(HEARTBEATTIMEOUT) * time.Millisecond
+	return time.Duration(100) * time.Millisecond
 }
 
 func min(a, b int) int {
