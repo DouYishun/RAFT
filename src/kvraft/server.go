@@ -6,6 +6,7 @@ import (
 	"log"
 	"raft"
 	"sync"
+	"time"
 )
 
 const Debug = 0
@@ -22,6 +23,11 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Type string
+	Key string
+	Value string
+	Id int64
+	ReqId int64
 }
 
 type RaftKV struct {
@@ -33,16 +39,73 @@ type RaftKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	data map[string]string
+	result map[int]chan Op
+	ack map[int64]int64
+}
+
+func (kv *RaftKV) AppendEntryToLog(entry Op) bool {
+	ix, _, isLeader := kv.rf.Start(entry)
+	if !isLeader { return false }
+
+	timeout := time.After(time.Millisecond * 1000)
+
+	kv.mu.Lock()
+	ch, ok := kv.result[ix]
+	if !ok {
+		ch = make(chan Op, 1)
+		kv.result[ix] = ch
+	}
+	kv.mu.Unlock()
+	select {
+	case op := <-ch:
+		return op == entry
+	case <-timeout:
+		return false
+	}
 }
 
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	entry := Op{Type:"Get", Key:args.Key, Id:args.Id, ReqId:args.ReqId}
+
+	if ok := kv.AppendEntryToLog(entry); !ok {
+		reply.WrongLeader = true
+	} else {
+		reply.WrongLeader = false
+		reply.Err = OK
+
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
+		reply.Value = kv.data[args.Key]
+		kv.ack[args.Id] = args.ReqId
+	}
+
 }
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	entry := Op{Type:args.Op, Key:args.Key, Value:args.Value, Id:args.Id, ReqId:args.ReqId}
+	if ok := kv.AppendEntryToLog(entry); !ok {
+		reply.WrongLeader = true
+	} else {
+		reply.WrongLeader = false
+		reply.Err = OK
+	}
 }
+
+
+func (kv *RaftKV) Apply(args Op) {
+	switch args.Type {
+	case "Get":
+		kv.data[args.Key] = args.Value
+	case "Append":
+		kv.data[args.Key] += args.Value
+	}
+	kv.ack[args.Id] = args.ReqId
+}
+
 
 //
 // the tester calls Kill() when a RaftKV instance won't
@@ -53,6 +116,14 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 func (kv *RaftKV) Kill() {
 	kv.rf.Kill()
 	// Your code here, if desired.
+}
+
+
+func (kv *RaftKV) DuplicateDetector(id int64, reqid int64) bool {
+	if v, ok := kv.ack[id]; ok {
+		return v >= reqid
+	}
+	return false
 }
 
 //
@@ -82,6 +153,66 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	kv.data = make(map[string]string)
+	kv.ack = make(map[int64]int64)
+	kv.result = make(map[int]chan Op)
+
+
+	go func() {
+		for msg := range kv.applyCh {
+			op := msg.Command.(Op)
+			kv.mu.Lock()
+			if !kv.DuplicateDetector(op.Id, op.ReqId) {
+				kv.Apply(op)
+			}
+			if ch, ok := kv.result[msg.Index]; ok {
+				select {
+				case <- kv.result[msg.Index]:
+				default:
+				}
+				ch <- op
+			} else {
+				kv.result[msg.Index] = make(chan Op, 1)
+			}
+			kv.mu.Unlock()
+		}
+	}()
+
 
 	return kv
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
