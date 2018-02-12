@@ -81,7 +81,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		reply.Value = kv.data[args.Key]
 		kv.ack[args.Id] = args.ReqId
 	}
-
 }
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
@@ -98,7 +97,7 @@ func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 func (kv *RaftKV) Apply(args Op) {
 	switch args.Type {
-	case "Get":
+	case "Put":
 		kv.data[args.Key] = args.Value
 	case "Append":
 		kv.data[args.Key] += args.Value

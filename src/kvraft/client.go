@@ -47,8 +47,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	args := GetArgs{Key:key, Id:ck.id, ReqId:ck.reqid}
+	args := GetArgs{Key:key, Id:ck.id}
 	ck.mu.Lock()
+	args.ReqId = ck.reqid
 	ck.reqid++
 	ck.mu.Unlock()
 	for {
@@ -59,8 +60,6 @@ func (ck *Clerk) Get(key string) string {
 			}
 		}
 	}
-
-	return ""
 }
 
 //
@@ -80,7 +79,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.ReqId = ck.reqid
 	ck.reqid++
 	ck.mu.Unlock()
-
 	for {
 		for _, v := range ck.servers {
 			var reply PutAppendReply
