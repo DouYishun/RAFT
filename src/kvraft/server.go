@@ -23,7 +23,7 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
-	Type string
+	Type string  // type of operation, "Get", "Put" and "Append"
 	Key string
 	Value string
 	Id int64
@@ -44,9 +44,12 @@ type RaftKV struct {
 	ack map[int64]int64
 }
 
-func (kv *RaftKV) AppendEntryToLog(entry Op) bool {
+func (kv *RaftKV) AppendLog(entry Op) bool {
 	ix, _, isLeader := kv.rf.Start(entry)
-	if !isLeader { return false }
+	if !isLeader {
+		DPrintf("not a leader\n")
+		return false
+	}
 
 	timeout := time.After(time.Millisecond * 1000)
 
@@ -61,16 +64,17 @@ func (kv *RaftKV) AppendEntryToLog(entry Op) bool {
 	case op := <-ch:
 		return op == entry
 	case <-timeout:
+		DPrintf("timeout\n")
 		return false
 	}
 }
 
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	/* Get() handler */
 	entry := Op{Type:"Get", Key:args.Key, Id:args.Id, ReqId:args.ReqId}
 
-	if ok := kv.AppendEntryToLog(entry); !ok {
+	if ok := kv.AppendLog(entry); !ok {
 		reply.WrongLeader = true
 	} else {
 		reply.WrongLeader = false
@@ -84,9 +88,9 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	/* PutAppend() handler */
 	entry := Op{Type:args.Op, Key:args.Key, Value:args.Value, Id:args.Id, ReqId:args.ReqId}
-	if ok := kv.AppendEntryToLog(entry); !ok {
+	if ok := kv.AppendLog(entry); !ok {
 		reply.WrongLeader = true
 	} else {
 		reply.WrongLeader = false
@@ -118,7 +122,7 @@ func (kv *RaftKV) Kill() {
 }
 
 
-func (kv *RaftKV) DuplicateDetector(id int64, reqid int64) bool {
+func (kv *RaftKV) isDuplicate(id int64, reqid int64) bool {
 	if v, ok := kv.ack[id]; ok {
 		return v >= reqid
 	}
@@ -161,12 +165,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 		for msg := range kv.applyCh {
 			op := msg.Command.(Op)
 			kv.mu.Lock()
-			if !kv.DuplicateDetector(op.Id, op.ReqId) {
+			if !kv.isDuplicate(op.Id, op.ReqId) {
 				kv.Apply(op)
 			}
 			if ch, ok := kv.result[msg.Index]; ok {
 				select {
-				case <- kv.result[msg.Index]:
+				case <-kv.result[msg.Index]:
 				default:
 				}
 				ch <- op

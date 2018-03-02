@@ -214,7 +214,7 @@ func GenericTest(t *testing.T, tag string, nclients int, unreliable bool, crash 
 			// log.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
 			if j < 10 {
-				log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+				//log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
 			}
 			key := strconv.Itoa(i)
 			// log.Printf("Check %v for client %d\n", j, i)
