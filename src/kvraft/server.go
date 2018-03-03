@@ -27,7 +27,7 @@ type Op struct {
 	Key string
 	Value string
 	Id int64
-	ReqId int64
+	ReqCnt int64
 }
 
 type RaftKV struct {
@@ -40,7 +40,7 @@ type RaftKV struct {
 
 	// Your definitions here.
 	data map[string]string
-	result map[int]chan Op
+	res map[int]chan Op
 	ack map[int64]int64
 }
 
@@ -54,10 +54,10 @@ func (kv *RaftKV) AppendLog(entry Op) bool {
 	timeout := time.After(time.Millisecond * 1000)
 
 	kv.mu.Lock()
-	ch, ok := kv.result[ix]
+	ch, ok := kv.res[ix]
 	if !ok {
 		ch = make(chan Op, 1)
-		kv.result[ix] = ch
+		kv.res[ix] = ch
 	}
 	kv.mu.Unlock()
 	select {
@@ -72,41 +72,31 @@ func (kv *RaftKV) AppendLog(entry Op) bool {
 
 func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 	/* Get() handler */
-	entry := Op{Type:"Get", Key:args.Key, Id:args.Id, ReqId:args.ReqId}
+	entry := Op{Type:"Get", Key:args.Key, Id:args.Id, ReqCnt:args.ReqCnt}
 
-	if ok := kv.AppendLog(entry); !ok {
-		reply.WrongLeader = true
-	} else {
+	if ok := kv.AppendLog(entry); ok {
 		reply.WrongLeader = false
 		reply.Err = OK
 
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 		reply.Value = kv.data[args.Key]
-		kv.ack[args.Id] = args.ReqId
+		kv.ack[args.Id] = args.ReqCnt
+	} else {
+		reply.WrongLeader = true
 	}
 }
 
 func (kv *RaftKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	/* PutAppend() handler */
-	entry := Op{Type:args.Op, Key:args.Key, Value:args.Value, Id:args.Id, ReqId:args.ReqId}
-	if ok := kv.AppendLog(entry); !ok {
-		reply.WrongLeader = true
-	} else {
+	entry := Op{Type:args.Op, Key:args.Key, Value:args.Value, Id:args.Id, ReqCnt:args.ReqCnt}
+
+	if ok := kv.AppendLog(entry); ok {
 		reply.WrongLeader = false
 		reply.Err = OK
+	} else {
+		reply.WrongLeader = true
 	}
-}
-
-
-func (kv *RaftKV) Apply(args Op) {
-	switch args.Type {
-	case "Put":
-		kv.data[args.Key] = args.Value
-	case "Append":
-		kv.data[args.Key] += args.Value
-	}
-	kv.ack[args.Id] = args.ReqId
 }
 
 
@@ -122,9 +112,17 @@ func (kv *RaftKV) Kill() {
 }
 
 
-func (kv *RaftKV) isDuplicate(id int64, reqid int64) bool {
+func (kv *RaftKV) isDuplicate(id int64, reqCnt int64) bool {
+	/*
+		Check duplicate. Return true for duplicate.
+	*/
 	if v, ok := kv.ack[id]; ok {
-		return v >= reqid
+		if v >= reqCnt {
+			DPrintf("Duplicate\n")
+			return true
+		} else {
+			return false
+		}
 	}
 	return false
 }
@@ -158,64 +156,33 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.data = make(map[string]string)
 	kv.ack = make(map[int64]int64)
-	kv.result = make(map[int]chan Op)
+	kv.res = make(map[int]chan Op)
 
 
 	go func() {
 		for msg := range kv.applyCh {
 			op := msg.Command.(Op)
 			kv.mu.Lock()
-			if !kv.isDuplicate(op.Id, op.ReqId) {
-				kv.Apply(op)
+			if !kv.isDuplicate(op.Id, op.ReqCnt) {
+				switch op.Type {
+				case "Put":
+					kv.data[op.Key] = op.Value
+				case "Append":
+					kv.data[op.Key] += op.Value
+				}
+				kv.ack[op.Id] = op.ReqCnt
 			}
-			if ch, ok := kv.result[msg.Index]; ok {
+			if ch, ok := kv.res[msg.Index]; ok {
 				select {
-				case <-kv.result[msg.Index]:
+				case <-kv.res[msg.Index]:
 				default:
 				}
 				ch <- op
 			} else {
-				kv.result[msg.Index] = make(chan Op, 1)
+				kv.res[msg.Index] = make(chan Op, 1)
 			}
 			kv.mu.Unlock()
 		}
 	}()
-
-
 	return kv
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

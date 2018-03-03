@@ -12,7 +12,7 @@ type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
 	id int64
-	reqid int64
+	reqCnt int64
 	mu sync.Mutex
 }
 
@@ -28,7 +28,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.servers = servers
 	// You'll have to add code here.
 	ck.id = nrand()
-	ck.reqid = 0
+	ck.reqCnt = 0
 	return ck
 }
 
@@ -49,8 +49,8 @@ func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
 	args := GetArgs{Key:key, Id:ck.id}
 	ck.mu.Lock()
-	args.ReqId = ck.reqid
-	ck.reqid++
+	args.ReqCnt = ck.reqCnt
+	ck.reqCnt++
 	ck.mu.Unlock()
 	for {
 		for _, v := range ck.servers {
@@ -76,8 +76,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
 	args := PutAppendArgs{Key:key, Value:value, Op:op, Id:ck.id}
 	ck.mu.Lock()
-	args.ReqId = ck.reqid
-	ck.reqid++
+	args.ReqCnt = ck.reqCnt
+	ck.reqCnt++
 	ck.mu.Unlock()
 	for {
 		for _, v := range ck.servers {
