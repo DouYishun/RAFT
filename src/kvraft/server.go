@@ -41,18 +41,17 @@ type RaftKV struct {
 	// Your definitions here.
 	data map[string]string
 	res map[int]chan Op
-	ack map[int64]int64
+	lastReq map[int64]int64
 }
 
 func (kv *RaftKV) AppendLog(entry Op) bool {
+	timeout := time.After(time.Millisecond * 1000)
+
 	ix, _, isLeader := kv.rf.Start(entry)
 	if !isLeader {
 		DPrintf("not a leader\n")
 		return false
 	}
-
-	timeout := time.After(time.Millisecond * 1000)
-
 	kv.mu.Lock()
 	ch, ok := kv.res[ix]
 	if !ok {
@@ -62,7 +61,12 @@ func (kv *RaftKV) AppendLog(entry Op) bool {
 	kv.mu.Unlock()
 	select {
 	case op := <-ch:
-		return op == entry
+		if op == entry {  // noticing that a different request has appeared at the index returned by Start()
+			return true
+		} else {
+			//DPrintf("Lost leadership\n")
+			return false
+		}
 	case <-timeout:
 		DPrintf("timeout\n")
 		return false
@@ -81,7 +85,6 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 		reply.Value = kv.data[args.Key]
-		kv.ack[args.Id] = args.ReqCnt
 	} else {
 		reply.WrongLeader = true
 	}
@@ -116,7 +119,7 @@ func (kv *RaftKV) isDuplicate(id int64, reqCnt int64) bool {
 	/*
 		Check duplicate. Return true for duplicate.
 	*/
-	if v, ok := kv.ack[id]; ok {
+	if v, ok := kv.lastReq[id]; ok {
 		if v >= reqCnt {
 			DPrintf("Duplicate\n")
 			return true
@@ -155,7 +158,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	kv.data = make(map[string]string)
-	kv.ack = make(map[int64]int64)
+	kv.lastReq = make(map[int64]int64)
 	kv.res = make(map[int]chan Op)
 
 
@@ -170,14 +173,10 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 				case "Append":
 					kv.data[op.Key] += op.Value
 				}
-				kv.ack[op.Id] = op.ReqCnt
+				kv.lastReq[op.Id] = op.ReqCnt
 			}
-			if ch, ok := kv.res[msg.Index]; ok {
-				select {
-				case <-kv.res[msg.Index]:
-				default:
-				}
-				ch <- op
+			if _, ok := kv.res[msg.Index]; ok {
+				kv.res[msg.Index] <-op
 			} else {
 				kv.res[msg.Index] = make(chan Op, 1)
 			}
